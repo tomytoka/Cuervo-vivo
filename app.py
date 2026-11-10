@@ -154,7 +154,7 @@ else:
     hist_comparacion = historico[historico['Dia_Semana'] == dia_comparacion].copy()
     locales_activos = sorted(df_vivo['Local'].unique())
     
-    # --- 1. PRE-CÁLCULO Y RANKING ---
+# --- 1. PRE-CÁLCULO Y RANKING ---
     datos_locales = {}
     for local in locales_activos:
         df_local = df_vivo[df_vivo['Local'] == local]
@@ -182,13 +182,19 @@ else:
         tk_hist_prop = (tk_hist_ant * fraccion_ant) + (tk_hist_act * fraccion_act)
         salon_hist_prop = (salon_hist_ant * fraccion_ant) + (salon_hist_act * fraccion_act)
         
-        saturacion = (tickets_hoy / tickets_hist_prop * 100) if tickets_hist_prop > 0 else (100 if tickets_hoy > 0 else 0)
+        # NUEVA LÓGICA DE SATURACIÓN BASADA EN CAPACIDAD FÍSICA
+        # 1. Buscamos el pico máximo histórico de bebidas de salón para este día exacto
+        pico_salon_dia = hist_comparacion[hist_comparacion['Local'] == local]['Promedio_Salon'].max()
+        
+        # 2. Medimos el volumen de salón de la última hora contra ese pico máximo
+        saturacion = (salon_hoy / pico_salon_dia * 100) if pico_salon_dia > 0 else 0
+        
         ratio_tk = (tk_hoy / bebidas_hoy * 100) if bebidas_hoy > 0 else 0
         
         datos_locales[local] = {
             'tickets_hoy': tickets_hoy, 'tk_hoy': tk_hoy, 'salon_hoy': salon_hoy,
             'tickets_hist_prop': tickets_hist_prop, 'tk_hist_prop': tk_hist_prop, 'salon_hist_prop': salon_hist_prop,
-            'saturacion': saturacion, 'ratio_tk': ratio_tk
+            'saturacion': saturacion, 'ratio_tk': ratio_tk, 'pico_salon': pico_salon_dia
         }
         
     locales_ordenados = sorted(locales_activos, key=lambda x: datos_locales[x]['saturacion'], reverse=True)
@@ -197,9 +203,10 @@ else:
     for local in locales_ordenados:
         datos = datos_locales[local]
         
-        if datos['saturacion'] >= 115:
+        # Nuevos umbrales calibrados para el formato de pico diario
+        if datos['saturacion'] >= 90:
             estado = "🔴 Explotado"
-        elif datos['saturacion'] >= 90:
+        elif datos['saturacion'] >= 60:
             estado = "🟡 Movimiento Normal"
         else:
             estado = "🟢 Hay Lugar"
