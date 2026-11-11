@@ -9,6 +9,9 @@ st.set_page_config(page_title="Termómetro Cuervo", layout="wide")
 
 st_autorefresh = st.empty()
 
+# ==========================================
+# 1. CONEXIÓN A ODOO
+# ==========================================
 @st.cache_resource
 def conectar_odoo():
     url = st.secrets["ODOO_URL"]
@@ -103,9 +106,21 @@ def obtener_datos_hoy(uid, models, db, password):
     
     return pd.merge(df_ordenes, tickets_agrupados, left_on='id', right_on='order_id', how='left').fillna(0)
 
-
+# ==========================================
+# 4. INTERFAZ GRÁFICA
+# ==========================================
 st.title("🔥 Termómetro Cuervo - Ocupación en Vivo")
 st.markdown("Comparativa de **tendencia diaria** y ocupación en los últimos 60 minutos.")
+
+# Diccionario de sillas reales por local. 
+# Si modificás las sillas o ponés mesas nuevas, ajustá el número acá directamente.
+CAPACIDAD_SILLAS = {
+    'COSTA RICA': 36,     # 10 blancas + 8 madera = 18 mesas x 2
+    'FRENCH': 20,         # 6 cuadradas + 4 redondas = 10 mesas x 2
+    'JURAMENTO': 40,      # 20 mesas x 2
+    'EL SALVADOR': 44,    # 6 chicas (x2) + 8 grandes (x4) = 44
+    'NEWBERY': 44,        # 14 mesas estandar (x2) + 2 mesones (x8 aprox) = 44
+}
 
 dias_nombres = {1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
 ahora_arg = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires"))
@@ -194,11 +209,17 @@ else:
             
         ratio_tk = (tk_hoy / bebidas_hoy * 100) if bebidas_hoy > 0 else 0
         
+        # --- CÁLCULO DE OCUPACIÓN FÍSICA ---
+        es_patio = any(x in local for x in ['GAVIOTA', 'PASEO DEL SOL'])
+        sillas_totales = CAPACIDAD_SILLAS.get(local, 30) # Default de seguridad
+        ocupacion_fisica = (salon_hoy / sillas_totales * 100) if sillas_totales > 0 else 0
+        
         datos_locales[local] = {
             'tickets_hoy': tickets_hoy, 'tickets_hist_prop': tickets_hist_prop, 'saturacion': saturacion,
             'tk_hoy': tk_hoy, 'salon_hoy': salon_hoy, 'tk_hist_prop': tk_hist_prop, 'salon_hist_prop': salon_hist_prop, 'ratio_tk': ratio_tk,
             'helados_hoy': helados_hoy, 'kilos_hoy': kilos_hoy, 'medios_hoy': medios_hoy, 'vasos_hoy': vasos_hoy,
-            'helados_hist_prop': helados_hist_prop, 'kilos_hist_prop': kilos_hist_prop, 'medios_hist_prop': medios_hist_prop, 'vasos_hist_prop': vasos_hist_prop
+            'helados_hist_prop': helados_hist_prop, 'kilos_hist_prop': kilos_hist_prop, 'medios_hist_prop': medios_hist_prop, 'vasos_hist_prop': vasos_hist_prop,
+            'ocupacion_fisica': ocupacion_fisica, 'es_patio': es_patio
         }
         
     locales_ordenados = sorted(locales_activos, key=lambda x: datos_locales[x]['saturacion'], reverse=True)
@@ -234,7 +255,7 @@ else:
             with col5:
                 st.metric("Vasos", int(datos['vasos_hoy']), f"{datos['vasos_hoy'] - datos['vasos_hist_prop']:.1f} vs normal", delta_color=delta_color(datos['vasos_hoy'], datos['vasos_hist_prop']))
         else:
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             with col1:
                 st.metric(f"Tickets ({hora_desde} a {hora_hasta})", int(datos['tickets_hoy']), f"{datos['tickets_hoy'] - datos['tickets_hist_prop']:.1f} vs normal", delta_color=delta_color(datos['tickets_hoy'], datos['tickets_hist_prop']))
             with col2:
@@ -243,8 +264,15 @@ else:
                 st.metric("Bebidas Salón", int(datos['salon_hoy']), f"{datos['salon_hoy'] - datos['salon_hist_prop']:.1f} vs normal", delta_color=delta_color(datos['salon_hoy'], datos['salon_hist_prop']))
             with col4:
                 ratio_int = int(datos['ratio_tk'])
-                st.metric("% Take Away (Últ. Hora)", f"{ratio_int}%")
+                st.metric("% Take Away", f"{ratio_int}%")
                 st.progress(ratio_int / 100.0)
+            with col5:
+                if datos['es_patio']:
+                    st.metric("Ocupación", "Patio C.")
+                else:
+                    ocup_int = int(datos['ocupacion_fisica'])
+                    st.metric("Ocupación Salón", f"{ocup_int}%")
+                    st.progress(min(ocup_int / 100.0, 1.0)) # Topeado en 1.0 (100%) para que la barra no de error si hay gente de pie
                       
         # GRÁFICO TENDENCIA
         if metrica_grafico == "Tickets":
