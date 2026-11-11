@@ -113,13 +113,13 @@ st.title("🔥 Termómetro Cuervo - Ocupación en Vivo")
 st.markdown("Comparativa de **tendencia diaria** y ocupación en los últimos 60 minutos.")
 
 # Diccionario de sillas reales por local. 
-# Si modificás las sillas o ponés mesas nuevas, ajustá el número acá directamente.
 CAPACIDAD_SILLAS = {
-    'COSTA RICA': 36,     # 10 blancas + 8 madera = 18 mesas x 2
-    'FRENCH': 20,         # 6 cuadradas + 4 redondas = 10 mesas x 2
-    'JURAMENTO': 40,      # 20 mesas x 2
-    'EL SALVADOR': 44,    # 6 chicas (x2) + 8 grandes (x4) = 44
-    'NEWBERY': 44,        # 14 mesas estandar (x2) + 2 mesones (x8 aprox) = 44
+    'COSTA RICA': 36,
+    'FRENCH': 20,
+    'JURAMENTO': 40,
+    'EL SALVADOR': 44,
+    'SALVADOR': 44, # Alias por si en Odoo figura sin el "El"
+    'NEWBERY': 44,
 }
 
 dias_nombres = {1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
@@ -166,6 +166,7 @@ else:
     hist_comparacion = historico[historico['Dia_Semana'] == dia_comparacion].copy()
     locales_activos = sorted(df_vivo['Local'].unique())
     
+    # --- 1. PRE-CÁLCULO Y RANKING ---
     datos_locales = {}
     for local in locales_activos:
         df_local = df_vivo[df_vivo['Local'] == local]
@@ -210,25 +211,33 @@ else:
         ratio_tk = (tk_hoy / bebidas_hoy * 100) if bebidas_hoy > 0 else 0
         
         # --- CÁLCULO DE OCUPACIÓN FÍSICA ---
-        es_patio = any(x in local for x in ['GAVIOTA', 'PASEO DEL SOL'])
-        sillas_totales = CAPACIDAD_SILLAS.get(local, 30) # Default de seguridad
+        es_patio = any(x in local for x in ['GAVIOTA', 'PASEO'])
+        sillas_totales = CAPACIDAD_SILLAS.get(local, 30)
         ocupacion_fisica = (salon_hoy / sillas_totales * 100) if sillas_totales > 0 else 0
+        
+        # Determinamos la métrica principal para el ranking y el semáforo
+        if 'GAVIOTA' in local or es_patio:
+            metrica_principal = saturacion # Patios miden su volumen contra su pico histórico
+        else:
+            metrica_principal = ocupacion_fisica # Locales a la calle miden contra sillas físicas
         
         datos_locales[local] = {
             'tickets_hoy': tickets_hoy, 'tickets_hist_prop': tickets_hist_prop, 'saturacion': saturacion,
             'tk_hoy': tk_hoy, 'salon_hoy': salon_hoy, 'tk_hist_prop': tk_hist_prop, 'salon_hist_prop': salon_hist_prop, 'ratio_tk': ratio_tk,
             'helados_hoy': helados_hoy, 'kilos_hoy': kilos_hoy, 'medios_hoy': medios_hoy, 'vasos_hoy': vasos_hoy,
             'helados_hist_prop': helados_hist_prop, 'kilos_hist_prop': kilos_hist_prop, 'medios_hist_prop': medios_hist_prop, 'vasos_hist_prop': vasos_hist_prop,
-            'ocupacion_fisica': ocupacion_fisica, 'es_patio': es_patio
+            'ocupacion_fisica': ocupacion_fisica, 'es_patio': es_patio, 'metrica_principal': metrica_principal
         }
         
-    locales_ordenados = sorted(locales_activos, key=lambda x: datos_locales[x]['saturacion'], reverse=True)
+    locales_ordenados = sorted(locales_activos, key=lambda x: datos_locales[x]['metrica_principal'], reverse=True)
     
+    # --- 2. RENDERIZADO VISUAL ---
     for local in locales_ordenados:
         datos = datos_locales[local]
         
-        if datos['saturacion'] >= 90: estado = "🔴 Explotado"
-        elif datos['saturacion'] >= 60: estado = "🟡 Movimiento Normal"
+        val_estado = datos['metrica_principal']
+        if val_estado >= 90: estado = "🔴 Explotado"
+        elif val_estado >= 60: estado = "🟡 Movimiento Normal"
         else: estado = "🟢 Hay Lugar"
             
         if 'GAVIOTA' in local:
@@ -268,13 +277,15 @@ else:
                 st.progress(ratio_int / 100.0)
             with col5:
                 if datos['es_patio']:
-                    st.metric("Ocupación", "Patio C.")
+                    sat_int = int(datos['saturacion'])
+                    st.metric("Saturación (Volumen)", f"{sat_int}%")
+                    st.progress(min(sat_int / 100.0, 1.0))
                 else:
                     ocup_int = int(datos['ocupacion_fisica'])
                     st.metric("Ocupación Salón", f"{ocup_int}%")
-                    st.progress(min(ocup_int / 100.0, 1.0)) # Topeado en 1.0 (100%) para que la barra no de error si hay gente de pie
+                    st.progress(min(ocup_int / 100.0, 1.0))
                       
-        # GRÁFICO TENDENCIA
+        # --- GRÁFICO TENDENCIA ---
         if metrica_grafico == "Tickets":
             col_hist, col_vivo = 'Promedio_Tickets', 'Vivo_Tickets'
         else:
